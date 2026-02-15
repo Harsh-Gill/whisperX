@@ -1,6 +1,7 @@
 import hashlib
 import os
-import urllib
+import re
+from importlib.resources import files
 from typing import Callable, Optional, Text, Union
 
 import numpy as np
@@ -17,46 +18,67 @@ from .diarize import Segment as SegmentX
 
 VAD_SEGMENTATION_URL = "https://whisperx.s3.eu-west-2.amazonaws.com/model_weights/segmentation/0b5b3216d60a2d32fc086b47ea8c67589aaeb26b7e07fcbe620d6d0b83e209ea/pytorch_model.bin"
 
+
 def load_vad_model(device, vad_onset=0.500, vad_offset=0.363, use_auth_token=None, model_fp=None):
-    model_dir = torch.hub._get_torch_home()
-    os.makedirs(model_dir, exist_ok = True)
+    # 1) Prefer packaged asset (upstream moved away from AWS hosting)
     if model_fp is None:
+        try:
+            model_fp = str(files("whisperx.assets").joinpath("pytorch_model.bin"))
+        except Exception:
+            model_fp = None
+
+    # 2) Fallback to torch cache location
+    if model_fp is None:
+        model_dir = torch.hub._get_torch_home()
+        os.makedirs(model_dir, exist_ok=True)
         model_fp = os.path.join(model_dir, "whisperx-vad-segmentation.bin")
+
     if os.path.exists(model_fp) and not os.path.isfile(model_fp):
         raise RuntimeError(f"{model_fp} exists and is not a regular file")
 
+    # 3) If missing, try resilient download (follows redirects)
     if not os.path.isfile(model_fp):
-        with urllib.request.urlopen(VAD_SEGMENTATION_URL) as source, open(model_fp, "wb") as output:
+        import requests
+
+        os.makedirs(os.path.dirname(model_fp), exist_ok=True)
+        resp = requests.get(VAD_SEGMENTATION_URL, stream=True, allow_redirects=True, timeout=120)
+        resp.raise_for_status()
+
+        total = int(resp.headers.get("Content-Length", 0))
+        with open(model_fp, "wb") as output:
             with tqdm(
-                total=int(source.info().get("Content-Length")),
+                total=total if total > 0 else None,
                 ncols=80,
                 unit="iB",
                 unit_scale=True,
                 unit_divisor=1024,
             ) as loop:
-                while True:
-                    buffer = source.read(8192)
-                    if not buffer:
-                        break
+                for chunk in resp.iter_content(chunk_size=8192):
+                    if not chunk:
+                        continue
+                    output.write(chunk)
+                    loop.update(len(chunk))
 
-                    output.write(buffer)
-                    loop.update(len(buffer))
-
+    # 4) Validate checksum only if URL still encodes sha256 folder
     model_bytes = open(model_fp, "rb").read()
-    if hashlib.sha256(model_bytes).hexdigest() != VAD_SEGMENTATION_URL.split('/')[-2]:
-        raise RuntimeError(
-            "Model has been downloaded but the SHA256 checksum does not not match. Please retry loading the model."
-        )
+    maybe_hash = VAD_SEGMENTATION_URL.rstrip("/").split("/")[-2]
+    if re.fullmatch(r"[0-9a-f]{64}", maybe_hash):
+        if hashlib.sha256(model_bytes).hexdigest() != maybe_hash:
+            raise RuntimeError(
+                "Model has been downloaded but the SHA256 checksum does not match. Please retry loading the model."
+            )
 
     vad_model = Model.from_pretrained(model_fp, use_auth_token=use_auth_token)
-    hyperparameters = {"onset": vad_onset, 
-                    "offset": vad_offset,
-                    "min_duration_on": 0.1,
-                    "min_duration_off": 0.1}
+    hyperparameters = {
+        "onset": vad_onset,
+        "offset": vad_offset,
+        "min_duration_on": 0.1,
+        "min_duration_off": 0.1,
+    }
     vad_pipeline = VoiceActivitySegmentation(segmentation=vad_model, device=torch.device(device))
     vad_pipeline.instantiate(hyperparameters)
 
-    return vad_pipeline
+    return vad_pipeline vad_pipeline
 
 class Binarize:
     """Binarize detection scores using hysteresis thresholding, with min-cut operation
