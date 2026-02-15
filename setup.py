@@ -1,27 +1,32 @@
 import os
-import platform
-
-import pkg_resources
 from setuptools import find_packages, setup
+
+
+def load_requirements(path):
+    requirements = []
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            requirements.append(line)
+    return requirements
+
 
 setup(
     name="whisperx",
     py_modules=["whisperx"],
     version="3.1.1",
     description="Time-Accurate Automatic Speech Recognition using Whisper.",
-    readme="README.md",
     python_requires=">=3.8",
     author="Max Bain",
     url="https://github.com/m-bain/whisperx",
     license="MIT",
     packages=find_packages(exclude=["tests*"]),
-    install_requires=[
-        str(r)
-        for r in pkg_resources.parse_requirements(
-            open(os.path.join(os.path.dirname(__file__), "requirements.txt"))
-        )
-    ]
-    + [f"pyannote.audio==3.1.1"],
+    install_requires=load_requirements(
+        os.path.join(os.path.dirname(__file__), "requirements.txt")
+    )
+    + ["pyannote.audio==3.1.1"],
     entry_points={
         "console_scripts": ["whisperx=whisperx.transcribe:cli"],
     },
