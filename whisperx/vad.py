@@ -15,7 +15,7 @@ from pyannote.core import Annotation, Segment, SlidingWindowFeature
 from tqdm import tqdm
 
 from .diarize import Segment as SegmentX
-VAD_SEGMENTATION_URL = "https://github.com/m-bain/whisperX/raw/main/whisperx/assets/pytorch_model.bin"
+VAD_SEGMENTATION_URL = "https://github.com/m-bain/whisperX/archive/161ae1f7ad2573444022f6231b715a3423664bc8.zip"
 
 
 def load_vad_model(device, vad_onset=0.500, vad_offset=0.363, use_auth_token=None, model_fp=None):
